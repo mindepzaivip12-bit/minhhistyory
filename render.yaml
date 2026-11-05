@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: tai-xiu-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_ID
+        sync: false
+      - key: DATA_COLLECTOR_USER
+        value: acc_clone_soi_cau
+      - key: DATA_COLLECTOR_PASS
+        sync: false
+      - key: MD5_API_BASE
+        value: https://leminhapiik.onrender.com
+      - key: PYTHON_VERSION
+        value: 3.11.0
